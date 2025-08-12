@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Molecular Geometry Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            background-color: #1f2937;
+            color: #f3f4f6;
+            overflow: hidden;
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        canvas {
+            display: block;
+        }
+        
+        /* Default mobile styles */
+        #controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background-color: rgba(17, 24, 39, 0.9);
+            padding: 0.75rem;
+            border-top-left-radius: 0.75rem;
+            border-top-right-radius: 0.75rem;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-around;
+            align-items: center;
+            gap: 0.5rem;
+            z-index: 10;
+        }
+
+        .selector-group {
+            display: flex;
+            gap: 1rem;
+        }
+
+        #controls label {
+            font-size: 0.8rem;
+            display: block;
+            margin-bottom: 0.25rem;
+            text-align: center;
+        }
+
+        #info-display {
+            width: 100%;
+            text-align: center;
+            margin-top: 0.5rem;
+            padding: 0.5rem;
+            background-color: rgba(55, 65, 81, 0.5);
+            border-radius: 0.5rem;
+        }
+        
+        .info-text {
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        .info-text .label {
+            font-weight: 500;
+            color: #9ca3af;
+        }
+        .info-text .value {
+            font-weight: bold;
+            color: #93c5fd;
+        }
+
+
+        select {
+            background-color: #374151;
+            color: #f3f4f6;
+            border: 1px solid #4b5563;
+            border-radius: 0.375rem;
+            padding: 0.5rem;
+            cursor: pointer;
+        }
+        select:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Desktop styles using a media query for screens 768px and wider */
+        @media (min-width: 768px) {
+            #controls {
+                top: 1rem;
+                left: 1rem;
+                bottom: auto;
+                width: auto;
+                max-width: 320px;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 1rem;
+                padding: 1rem;
+                border-radius: 0.5rem;
+            }
+
+            .selector-group {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            #controls label {
+                font-size: 1rem;
+                text-align: left;
+            }
+
+            #info-display {
+                text-align: left;
+            }
+            .info-text {
+                font-size: 1rem;
+            }
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <div id="container"></div>
+
+    <div id="controls">
+        <div class="selector-group">
+            <div>
+                <label for="terminal-atoms-select">Terminal Atoms</label>
+                <select id="terminal-atoms-select">
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                </select>
+            </div>
+
+            <div>
+                <label for="lone-pairs-select">Lone Pairs</label>
+                <select id="lone-pairs-select">
+                    <option value="0">0</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                </select>
+            </div>
+        </div>
+        <div id="info-display">
+            <div id="electron-geometry-display" class="info-text"></div>
+            <div id="molecular-geometry-display" class="info-text"></div>
+            <div id="axe-class-display" class="info-text"></div>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Scene Globals ---
+        let scene, camera, renderer, controls;
+        const container = document.getElementById('container');
+        const moleculeGroup = new THREE.Group();
+
+        // --- UI Elements ---
+        const terminalAtomsSelect = document.getElementById('terminal-atoms-select');
+        const lonePairsSelect = document.getElementById('lone-pairs-select');
+        const electronGeoDisplay = document.getElementById('electron-geometry-display');
+        const molecularGeoDisplay = document.getElementById('molecular-geometry-display');
+        const axeClassDisplay = document.getElementById('axe-class-display');
+
+        // --- VSEPR Data ---
+        const VSEPR_DATA = {
+            2: { electronGeometry: "Linear", 0: { name: "Linear", atoms: [[0, 2.5, 0], [0, -2.5, 0]], lone: [] } },
+            3: { electronGeometry: "Trigonal Planar", 0: { name: "Trigonal Planar", atoms: [[2.5, 0, 0], [-1.25, 2.16, 0], [-1.25, -2.16, 0]], lone: [] }, 1: { name: "Bent", atoms: [[2.16, -1.25, 0], [-2.16, -1.25, 0]], lone: [[0, 2.5, 0]] } },
+            4: { electronGeometry: "Tetrahedral", 0: { name: "Tetrahedral", atoms: [[1.44, 1.44, 1.44], [1.44, -1.44, -1.44], [-1.44, 1.44, -1.44], [-1.44, -1.44, 1.44]], lone: [] }, 1: { name: "Trigonal Pyramidal", atoms: [[2.35, -0.8, 0], [-1.17, -0.8, 2.03], [-1.17, -0.8, -2.03]], lone: [[0, 2.0, 0]] }, 2: { name: "Bent", atoms: [[1.76, 1.76, 0], [-1.76, 1.76, 0]], lone: [[0, -1.25, 1.76], [0, -1.25, -1.76]] } },
+            5: { electronGeometry: "Trigonal Bipyramidal", 0: { name: "Trigonal Bipyramidal", atoms: [[0, 2.5, 0], [0, -2.5, 0], [2.16, 0, 1.25], [-2.16, 0, 1.25], [0, 0, -2.5]], lone: [] }, 1: { name: "Seesaw", atoms: [[0, 2.2, 0], [0, -2.2, 0], [2, 0, 0], [-2, 0, 0]], lone: [[0, 0, -2.5]] }, 2: { name: "T-shaped", atoms: [[0, 2.5, 0], [0, -2.5, 0], [2.16, 0, 0]], lone: [[-1.08, 0, 1.88], [-1.08, 0, -1.88]] }, 3: { name: "Linear", atoms: [[0, 2.5, 0], [0, -2.5, 0]], lone: [[2.16, 0, 1.25], [-2.16, 0, 1.25], [0, 0, -2.5]] } },
+            6: { electronGeometry: "Octahedral", 0: { name: "Octahedral", atoms: [[2.5, 0, 0], [-2.5, 0, 0], [0, 2.5, 0], [0, -2.5, 0], [0, 0, 2.5], [0, 0, -2.5]], lone: [] }, 1: { name: "Square Pyramidal", atoms: [[2.2, 0, 0], [-2.2, 0, 0], [0, 0, 2.2], [0, 0, -2.2], [0, 2.2, 0]], lone: [[0, -2.5, 0]] }, 2: { name: "Square Planar", atoms: [[2.5, 0, 0], [-2.5, 0, 0], [0, 0, 2.5], [0, 0, -2.5]], lone: [[0, 2.5, 0], [0, -2.5, 0]] } }
+        };
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1f2937);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 2, 8);
+            camera.lookAt(0, 0, 0);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            directionalLight.position.set(5, 10, 7.5);
+            scene.add(directionalLight);
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            scene.add(moleculeGroup);
+            terminalAtomsSelect.addEventListener('change', updateMolecule);
+            lonePairsSelect.addEventListener('change', updateMolecule);
+            window.addEventListener('resize', onWindowResize);
+            updateMolecule();
+            animate();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function createAtom(radius, color) {
+            const geometry = new THREE.SphereGeometry(radius, 32, 32);
+            const material = new THREE.MeshStandardMaterial({ color: color, roughness: 0.4, metalness: 0.1 });
+            return new THREE.Mesh(geometry, material);
+        }
+
+        function createLonePair() {
+            const lonePairGroup = new THREE.Group();
+            const lobeGeometry = new THREE.SphereGeometry(0.7, 16, 16);
+            const lobeMaterial = new THREE.MeshStandardMaterial({ color: 0xfacc15, transparent: true, opacity: 0.3 });
+            const lobe = new THREE.Mesh(lobeGeometry, lobeMaterial);
+            lonePairGroup.add(lobe);
+            const dotGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+            const dotMaterial = new THREE.MeshStandardMaterial({ color: 0x1e40af });
+            const dot1 = new THREE.Mesh(dotGeometry, dotMaterial);
+            dot1.position.set(0, 0.2, 0);
+            lonePairGroup.add(dot1);
+            const dot2 = new THREE.Mesh(dotGeometry, dotMaterial);
+            dot2.position.set(0, -0.2, 0);
+            lonePairGroup.add(dot2);
+            return lonePairGroup;
+        }
+
+        function createBond(start, end) {
+            const direction = new THREE.Vector3().subVectors(end, start);
+            const orientation = new THREE.Matrix4();
+            orientation.lookAt(start, end, new THREE.Object3D().up);
+            orientation.multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
+            const geometry = new THREE.CylinderGeometry(0.1, 0.1, direction.length(), 8, 1);
+            const material = new THREE.MeshStandardMaterial({ color: 0x9ca3af, roughness: 0.8 });
+            const bond = new THREE.Mesh(geometry, material);
+            bond.applyMatrix4(orientation);
+            bond.position.copy(start).add(direction.multiplyScalar(0.5));
+            return bond;
+        }
+
+        function updateMolecule() {
+            while (moleculeGroup.children.length > 0) {
+                moleculeGroup.remove(moleculeGroup.children[0]);
+            }
+
+            const numAtoms = parseInt(terminalAtomsSelect.value);
+            const numLonePairs = parseInt(lonePairsSelect.value);
+            const totalPairs = numAtoms + numLonePairs;
+
+            const electronGeometryData = VSEPR_DATA[totalPairs];
+            if (!electronGeometryData || !electronGeometryData[numLonePairs]) {
+                electronGeoDisplay.innerHTML = `<span class="label">Electron Geometry:</span> <span class="value">N/A</span>`;
+                molecularGeoDisplay.innerHTML = `<span class="label">Molecular Geometry:</span> <span class="value">Invalid</span>`;
+                axeClassDisplay.innerHTML = `<span class="label">Class:</span> <span class="value">N/A</span>`;
+                return;
+            }
+
+            const molecularGeometryData = electronGeometryData[numLonePairs];
+            
+            // Update UI Text
+            electronGeoDisplay.innerHTML = `<span class="label">Electron Pair Geometry:</span> <span class="value">${electronGeometryData.electronGeometry}</span>`;
+            molecularGeoDisplay.innerHTML = `<span class="label">Molecular Geometry:</span> <span class="value">${molecularGeometryData.name}</span>`;
+            let axeClass = `AX<sub>${numAtoms}</sub>`;
+            if (numLonePairs > 0) {
+                axeClass += `E<sub>${numLonePairs}</sub>`;
+            }
+            axeClassDisplay.innerHTML = `<span class="label">Class:</span> <span class="value">${axeClass}</span>`;
+
+            // Add Central Atom
+            const centralAtom = createAtom(0.5, 0xef4444);
+            moleculeGroup.add(centralAtom);
+
+            // Add Terminal Atoms and Bonds
+            molecularGeometryData.atoms.forEach(posArray => {
+                const pos = new THREE.Vector3(...posArray);
+                const atom = createAtom(0.35, 0xf1f5f9);
+                atom.position.copy(pos);
+                moleculeGroup.add(atom);
+                moleculeGroup.add(createBond(new THREE.Vector3(0,0,0), pos));
+            });
+
+            // Add Lone Pairs
+            molecularGeometryData.lone.forEach(posArray => {
+                const pos = new THREE.Vector3(...posArray);
+                const lonePair = createLonePair();
+                lonePair.position.copy(pos);
+                lonePair.lookAt(0,0,0);
+                moleculeGroup.add(lonePair);
+            });
+        }
+        init();
+    </script>
+</body>
+</html>

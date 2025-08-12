@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Atomic Line Spectra Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827;
+            color: #e5e7eb;
+            overflow: hidden;
+        }
+        #container {
+            width: 100%;
+            height: 100%;
+            display: block;
+            position: relative; /* Needed for absolute positioning of the fullscreen button */
+        }
+        .font-mono {
+            font-family: 'Roboto Mono', monospace;
+        }
+    </style>
+</head>
+<body class="flex flex-col md:flex-row h-screen">
+
+    <!-- ==== CONTROLS ==== -->
+    <aside id="controls-container" class="w-full md:w-80 bg-gray-900 p-4 shadow-lg flex-shrink-0 overflow-y-auto">
+        <div id="controls">
+            <h1 class="text-lg font-bold text-white mb-3">Spectral Series</h1>
+            <div class="flex items-end gap-3">
+                <div class="flex-grow">
+                    <label for="series-select" class="block text-xs font-medium text-gray-300 mb-1">Select Series:</label>
+                    <select id="series-select" class="w-full bg-gray-700 border border-gray-600 rounded-md py-2 px-3 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                        <option value="lyman">Lyman (n → 1)</option>
+                        <option value="balmer" selected>Balmer (n → 2)</option>
+                        <option value="paschen">Paschen (n → 3)</option>
+                        <option value="brackett">Brackett (n → 4)</option>
+                        <option value="pfund">Pfund (n → 5)</option>
+                    </select>
+                </div>
+                <button id="run-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors h-10">Run</button>
+            </div>
+            <div id="info-display" class="mt-3 text-xs text-gray-400 h-16"></div>
+        </div>
+    </aside>
+
+    <!-- ==== SIMULATOR AREA ==== -->
+    <main id="container" class="flex-1 bg-black">
+        <button id="fullscreen-btn" class="absolute bottom-4 right-4 z-20 p-2 bg-gray-700/50 hover:bg-gray-600/70 rounded-full text-white transition-opacity duration-300 opacity-50 hover:opacity-100" title="Toggle Fullscreen">
+            <svg id="fullscreen-enter-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            <svg id="fullscreen-exit-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="hidden"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
+        </button>
+    </main>
+
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- Basic Scene Setup ---
+        let scene, camera, renderer;
+        const container = document.getElementById('container');
+        const infoDisplay = document.getElementById('info-display');
+        const seriesSelect = document.getElementById('series-select');
+        const runButton = document.getElementById('run-button');
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        const enterIcon = document.getElementById('fullscreen-enter-icon');
+        const exitIcon = document.getElementById('fullscreen-exit-icon');
+
+        // --- Simulation Objects ---
+        let electron, photonWave;
+        const energyLevels = [];
+        const sceneObjects = new THREE.Group();
+        const spectrumLines = new THREE.Group();
+        
+        var isAnimating = false;
+        var animationId = 0; // To track and cancel animations
+        var isMobileLayout = false;
+
+
+        // --- Constants ---
+        const R_H = 1.097e7; // Rydberg constant for Hydrogen in m^-1
+        const MAX_LEVELS = 9; // Max n level to draw
+        const MAX_TRANSITIONS = 4; // Number of lines to show per series
+
+        // --- Series Data ---
+        const SERIES_DATA = {
+            lyman:   { n_final: 1, name: "Lyman", region: "Ultraviolet" },
+            balmer:  { n_final: 2, name: "Balmer", region: "Visible/UV" },
+            paschen: { n_final: 3, name: "Paschen", region: "Infrared" },
+            brackett:{ n_final: 4, name: "Brackett", region: "Infrared" },
+            pfund:   { n_final: 5, name: "Pfund", region: "Infrared" }
+        };
+
+        const wavelengthToColor = (lambda) => {
+            if (lambda >= 380 && lambda < 440) return 0x8F00FF; // Violet
+            if (lambda >= 440 && lambda < 490) return 0x0000FF; // Blue
+            if (lambda >= 490 && lambda < 570) return 0x00FF00; // Green
+            if (lambda >= 570 && lambda < 590) return 0xFFFF00; // Yellow
+            if (lambda >= 590 && lambda < 620) return 0xFF7F00; // Orange
+            if (lambda >= 620 && lambda < 750) return 0xFF0000; // Red
+            return 0xCCCCCC; // Default for UV/IR (light grey)
+        };
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000);
+
+            camera = new THREE.OrthographicCamera(0, 0, 0, 0, 1, 1000);
+            camera.position.set(0, 0, 10);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            container.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1);
+            scene.add(ambientLight);
+            scene.add(sceneObjects);
+
+            electron = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 16), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
+            electron.visible = false;
+            scene.add(electron);
+
+            const waveMaterial = new THREE.LineBasicMaterial({ color: 0xffffff });
+            const waveGeometry = new THREE.BufferGeometry();
+            const waveVertices = new Float32Array(100 * 3);
+            waveGeometry.setAttribute('position', new THREE.BufferAttribute(waveVertices, 3));
+            photonWave = new THREE.Line(waveGeometry, waveMaterial);
+            photonWave.visible = false;
+            scene.add(photonWave);
+            
+            runButton.addEventListener('click', runSeriesAnimation);
+            window.addEventListener('resize', onWindowResize);
+            fullscreenBtn.addEventListener('click', toggleFullScreen);
+            document.addEventListener('fullscreenchange', updateFullscreenIcons);
+
+            onWindowResize();
+            animate();
+        }
+
+        function drawSceneElements() {
+            sceneObjects.clear();
+            energyLevels.length = 0;
+
+            const diagramX = isMobileLayout ? 0 : -10;
+            const diagramY = isMobileLayout ? 2 : 0;
+            const diagramWidth = isMobileLayout ? 9 : 4;
+            
+            const lineMaterial = new THREE.LineBasicMaterial({ color: 0x666666 });
+            sceneObjects.add(makeTextSprite("Energy Levels", { fontsize: 18 }).setPosition(diagramX, diagramY + 8.5, 0));
+            for (let i = 1; i <= MAX_LEVELS; i++) {
+                const y = (diagramY + 8) - 18.75 / (i * 0.8 + 1);
+                const points = [new THREE.Vector3(diagramX - diagramWidth / 2, y, 0), new THREE.Vector3(diagramX + diagramWidth / 2, y, 0)];
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const levelLine = new THREE.Line(geometry, lineMaterial);
+                energyLevels.push({ n: i, y: y, object: levelLine });
+                sceneObjects.add(levelLine);
+                sceneObjects.add(makeTextSprite(`n=${i}`, { fontsize: 14 }).setPosition(diagramX - diagramWidth / 2 - 0.8, y, 0));
+            }
+
+            const spectrumY = isMobileLayout ? -8 : 0;
+            const spectrumWidth = isMobileLayout ? 18 : 2;
+            const spectrumHeight = isMobileLayout ? 2 : 18;
+
+            const spectrumBg = new THREE.Mesh(new THREE.PlaneGeometry(spectrumWidth, spectrumHeight), new THREE.MeshBasicMaterial({ color: 0x111111, side: THREE.DoubleSide }));
+            spectrumBg.position.set(isMobileLayout ? 0 : 10, spectrumY, -1);
+            sceneObjects.add(spectrumBg);
+            sceneObjects.add(spectrumLines);
+            spectrumLines.position.set(isMobileLayout ? 0 : 10, spectrumY, 0);
+            sceneObjects.add(makeTextSprite("Emission Spectrum", { fontsize: 18 }).setPosition(isMobileLayout ? 0 : 10, spectrumY + spectrumHeight/2 + 0.8, 0));
+        }
+
+        function runSeriesAnimation() {
+            if (isAnimating) return;
+            
+            isAnimating = true;
+            animationId++;
+            runButton.disabled = true;
+            runButton.textContent = "Running...";
+            spectrumLines.clear();
+            infoDisplay.innerHTML = '';
+
+            const seriesKey = seriesSelect.value;
+            const series = SERIES_DATA[seriesKey];
+            const transitions = [];
+            for(let i = 1; i <= MAX_TRANSITIONS; i++) {
+                const n_start = series.n_final + i;
+                if (n_start <= MAX_LEVELS) {
+                    transitions.push(n_start);
+                }
+            }
+
+            let currentTransitionIndex = 0;
+
+            function nextTransition(localAnimationId) {
+                if (localAnimationId !== animationId) return;
+
+                if (currentTransitionIndex >= transitions.length) {
+                    isAnimating = false;
+                    runButton.disabled = false;
+                    runButton.textContent = "Run";
+                    return;
+                }
+                const n_start = transitions[currentTransitionIndex];
+                startTransition(n_start, series.n_final, currentTransitionIndex, () => nextTransition(localAnimationId));
+                currentTransitionIndex++;
+            }
+            nextTransition(animationId);
+        }
+        
+        function startTransition(n_start, n_final, transitionIndex, callback) {
+            const series = Object.values(SERIES_DATA).find(s => s.n_final === n_final);
+            const wavelength_m = 1 / (R_H * (1/(n_final**2) - 1/(n_start**2)));
+            const wavelength_nm = wavelength_m * 1e9;
+            const color = wavelengthToColor(wavelength_nm);
+
+            infoDisplay.innerHTML = `
+                <div class="font-mono">Series: <span class="font-bold text-white">${series.name} (${series.region})</span></div>
+                <div class="font-mono">Transition: <span class="font-bold text-white">n=${n_start} → n=${n_final}</span></div>
+                <div class="font-mono">Wavelength: <span class="font-bold text-white">${wavelength_nm.toFixed(1)} nm</span></div>
+            `;
+            
+            const startLevel = energyLevels.find(l => l.n === n_start);
+            const endLevel = energyLevels.find(l => l.n === n_final);
+
+            if (!startLevel || !endLevel) {
+                console.error("Could not find energy level for transition.", {n_start, n_final});
+                callback();
+                return;
+            }
+            const startY = startLevel.y;
+            const endY = endLevel.y;
+
+            const startX = isMobileLayout ? 0 : -10;
+
+            electron.position.set(startX, startY, 0);
+            electron.visible = true;
+            
+            let progress = 0;
+            const duration = 800;
+            const startTime = Date.now();
+
+            function animateDrop() {
+                const elapsedTime = Date.now() - startTime;
+                progress = Math.min(elapsedTime / duration, 1);
+                electron.position.y = startY + (endY - startY) * progress;
+
+                if (progress < 1) {
+                    requestAnimationFrame(animateDrop);
+                } else {
+                    electron.visible = false;
+                    emitPhotonWave(startX, endY, color, wavelength_nm, transitionIndex, callback);
+                }
+            }
+            animateDrop();
+        }
+
+        function emitPhotonWave(startX, startY, color, wavelength, transitionIndex, callback) {
+            photonWave.material.color.setHex(color);
+            photonWave.position.set(startX, startY, 0);
+            photonWave.visible = true;
+            
+            let progress = 0;
+            const duration = 1200;
+            const startTime = Date.now();
+            const visualLambda = 4 - Math.log10(wavelength);
+            const waveLength = isMobileLayout ? 10 : 15;
+
+            function animateWave() {
+                const elapsedTime = Date.now() - startTime;
+                progress = Math.min(elapsedTime / duration, 1);
+
+                if (isMobileLayout) {
+                    photonWave.position.y = startY - progress * (startY + 6);
+                } else {
+                    photonWave.position.x = startX + progress * 18;
+                }
+
+                const positions = photonWave.geometry.attributes.position.array;
+                const timePhase = elapsedTime * 0.01;
+                for (let i = 0; i < 100; i++) {
+                    const p = i / 99;
+                    const x = isMobileLayout ? Math.sin((p * waveLength * visualLambda) + timePhase) * 0.5 : -p * waveLength;
+                    const y = isMobileLayout ? -p * waveLength : Math.sin((p * waveLength * visualLambda) + timePhase) * 0.5;
+                    positions[i * 3] = x;
+                    positions[i * 3 + 1] = y;
+                    positions[i * 3 + 2] = 0;
+                }
+                photonWave.geometry.attributes.position.needsUpdate = true;
+
+                if (progress < 1) {
+                    requestAnimationFrame(animateWave);
+                } else {
+                    photonWave.visible = false;
+                    drawSpectrumLine(color, wavelength);
+                    setTimeout(callback, 200);
+                }
+            }
+            animateWave();
+        }
+
+        function drawSpectrumLine(color, wavelength) {
+            const lineWidth = isMobileLayout ? 0.2 : 8; 
+            const lineHeight = isMobileLayout ? 1.8 : 0.1;
+            const lineGeo = new THREE.PlaneGeometry(lineWidth, lineHeight);
+            const lineMat = new THREE.MeshBasicMaterial({ color: color });
+            const line = new THREE.Mesh(lineGeo, lineMat);
+            
+            const minLog = Math.log10(90);
+            const maxLog = Math.log10(4050);
+            const currentLog = Math.log10(wavelength);
+            const normalizedPosition = (currentLog - minLog) / (maxLog - minLog);
+
+            if (isMobileLayout) {
+                const spectrumW = 16;
+                const xPos = (-spectrumW / 2) + normalizedPosition * spectrumW;
+                line.position.set(xPos, 0, 0);
+            } else {
+                const spectrumH = 16;
+                const yPos = (spectrumH / 2) - normalizedPosition * spectrumH;
+                line.position.set(0, yPos, 0);
+            }
+            
+            spectrumLines.add(line);
+        }
+
+        function makeTextSprite(message, parameters = {}) {
+            const { fontface = "Arial", fontsize = 18, textColor = { r: 255, g: 255, b: 255, a: 1.0 } } = parameters;
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            context.font = `Bold ${fontsize}px ${fontface}`;
+            const metrics = context.measureText(message);
+            const textWidth = metrics.width;
+            canvas.width = textWidth;
+            canvas.height = fontsize * 1.4;
+            context.font = `Bold ${fontsize}px ${fontface}`;
+            context.fillStyle = `rgba(${textColor.r}, ${textColor.g}, ${textColor.b}, ${textColor.a})`;
+            context.fillText(message, 0, fontsize);
+            const texture = new THREE.Texture(canvas);
+            texture.needsUpdate = true;
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.scale.set(textWidth / fontsize, 1.4, 1.0).multiplyScalar(0.1 * fontsize);
+            sprite.setPosition = (x, y, z) => {
+                sprite.position.set(x,y,z);
+                return sprite;
+            }
+            return sprite;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            
+            const newLayoutIsMobile = width < 768;
+            if (newLayoutIsMobile !== isMobileLayout) {
+                isAnimating = false;
+                animationId++;
+                runButton.disabled = false;
+                runButton.textContent = "Run";
+                isMobileLayout = newLayoutIsMobile;
+                drawSceneElements();
+            }
+
+            const aspect = width / height;
+            const zoom = 15.6;
+            camera.left = -zoom * aspect;
+            camera.right = zoom * aspect;
+            camera.top = zoom;
+            camera.bottom = -zoom;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        }
+
+        function toggleFullScreen() {
+            const appElement = document.body;
+            if (!document.fullscreenElement) {
+                appElement.requestFullscreen().catch(err => {
+                    console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+                });
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        }
+
+        function updateFullscreenIcons() {
+             if (document.fullscreenElement) {
+                enterIcon.classList.add('hidden');
+                exitIcon.classList.remove('hidden');
+            } else {
+                enterIcon.classList.remove('hidden');
+                exitIcon.classList.add('hidden');
+            }
+        }
+        
+        init();
+    </script>
+</body>
+</html>

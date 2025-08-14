@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Electron Configuration Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827;
+            color: #e5e7eb;
+        }
+        .font-mono {
+            font-family: 'Roboto Mono', monospace;
+        }
+        .orbital-box {
+            width: 50px;
+            height: 50px;
+            border: 2px solid #4b5563;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 24px;
+            font-weight: bold;
+            margin: 2px;
+            position: relative;
+        }
+        .electron {
+            position: absolute;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+        }
+        .electron.up { color: #a7f3d0; }
+        .electron.down { color: #fecaca; }
+        .electron.visible { opacity: 1; }
+        .electron-1 { transform: translateX(-8px); }
+        .electron-2 { transform: translateX(8px); }
+    </style>
+</head>
+<body class="flex flex-col md:flex-row h-screen">
+
+    <!-- ==== CONTROLS ==== -->
+    <aside id="controls-container" class="w-full md:w-80 bg-gray-900 p-4 shadow-lg flex-shrink-0">
+        <div class="flex justify-between items-center mb-4">
+            <h1 class="text-lg font-bold text-white">Electron Configuration</h1>
+            <a href="index.html" class="p-2 bg-gray-700/50 hover:bg-gray-600/70 rounded-full text-white" title="Back to Home">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </a>
+        </div>
+        <div class="space-y-4">
+            <div>
+                <label for="electron-input" class="block text-sm font-medium text-gray-300 mb-1">Number of Electrons (1-40):</label>
+                <input type="number" id="electron-input" min="1" max="40" value="1" class="w-full bg-gray-700 border border-gray-600 rounded-md py-2 px-3 text-white">
+            </div>
+            <div class="flex gap-2">
+                <button id="fill-button" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md">Fill</button>
+                <button id="reset-button" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md">Reset</button>
+            </div>
+            <div>
+                <h2 class="text-md font-bold text-white mb-2">Configuration:</h2>
+                <div id="config-display" class="font-mono text-green-300 bg-gray-800 p-2 rounded-md text-sm h-16 overflow-y-auto"></div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ==== VISUALIZATION ==== -->
+    <main id="container" class="flex-1 bg-black p-4 overflow-auto relative">
+        <div id="diagram-container" class="flex flex-col-reverse items-center space-y-2 space-y-reverse">
+            <!-- Orbitals will be generated here -->
+        </div>
+        <button id="fullscreen-btn" class="absolute bottom-4 right-4 z-20 p-2 bg-gray-700/50 hover:bg-gray-600/70 rounded-full text-white" title="Toggle Fullscreen">
+            <svg id="fullscreen-enter-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            <svg id="fullscreen-exit-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="hidden"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
+        </button>
+    </main>
+
+    <script>
+        const electronInput = document.getElementById('electron-input');
+        const fillButton = document.getElementById('fill-button');
+        const resetButton = document.getElementById('reset-button');
+        const configDisplay = document.getElementById('config-display');
+        const diagramContainer = document.getElementById('diagram-container');
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        const enterIcon = document.getElementById('fullscreen-enter-icon');
+        const exitIcon = document.getElementById('fullscreen-exit-icon');
+
+        let isAnimating = false;
+
+        // Defines orbitals in filling order (Aufbau principle)
+        const orbitals = [
+            { name: '1s', capacity: 2, boxes: 1, energy: 1 },
+            { name: '2s', capacity: 2, boxes: 1, energy: 2 },
+            { name: '2p', capacity: 6, boxes: 3, energy: 2 },
+            { name: '3s', capacity: 2, boxes: 1, energy: 3 },
+            { name: '3p', capacity: 6, boxes: 3, energy: 3 },
+            { name: '4s', capacity: 2, boxes: 1, energy: 4 },
+            { name: '3d', capacity: 10, boxes: 5, energy: 3 },
+            { name: '4p', capacity: 6, boxes: 3, energy: 4 },
+        ];
+
+        // Function to create the orbital diagram in the DOM
+        function createDiagram() {
+            diagramContainer.innerHTML = '';
+            // The `flex-col-reverse` on the container will handle the visual layout.
+            orbitals.forEach(orbital => {
+                const levelDiv = document.createElement('div');
+                levelDiv.className = 'flex items-center';
+                
+                const label = document.createElement('div');
+                label.className = 'w-12 text-right mr-2 font-bold';
+                label.textContent = orbital.name;
+                levelDiv.appendChild(label);
+
+                const boxesContainer = document.createElement('div');
+                boxesContainer.className = 'flex';
+                boxesContainer.id = `orbital-${orbital.name}`;
+                
+                for (let i = 0; i < orbital.boxes; i++) {
+                    const box = document.createElement('div');
+                    box.className = 'orbital-box';
+                    boxesContainer.appendChild(box);
+                }
+                levelDiv.appendChild(boxesContainer);
+                diagramContainer.appendChild(levelDiv);
+            });
+        }
+
+        // Function to reset the simulation
+        function resetSimulation() {
+            isAnimating = false; // Stop any ongoing animation
+            configDisplay.textContent = '';
+            const allElectrons = document.querySelectorAll('.electron');
+            allElectrons.forEach(el => el.remove());
+            fillButton.disabled = false;
+            electronInput.disabled = false;
+        }
+
+        // The main animation function
+        async function fillOrbitals() {
+            if (isAnimating) return;
+            resetSimulation();
+            isAnimating = true;
+            fillButton.disabled = true;
+            electronInput.disabled = true;
+
+            const numElectrons = parseInt(electronInput.value);
+            if (isNaN(numElectrons) || numElectrons < 1 || numElectrons > 40) {
+                alert("Please enter a number between 1 and 40.");
+                resetSimulation();
+                return;
+            }
+
+            const orbitalCounts = {};
+
+            for (let e = 1; e <= numElectrons; e++) {
+                if (!isAnimating) break; // Allow reset to interrupt
+
+                let placed = false;
+                for (const orbital of orbitals) {
+                    const orbitalId = `orbital-${orbital.name}`;
+                    const container = document.getElementById(orbitalId);
+                    const boxes = container.children;
+
+                    // Hund's Rule: Fill singly first
+                    for (let i = 0; i < boxes.length; i++) {
+                        if (boxes[i].children.length === 0) {
+                            addElectron(boxes[i], 'up');
+                            orbitalCounts[orbital.name] = (orbitalCounts[orbital.name] || 0) + 1;
+                            placed = true;
+                            break;
+                        }
+                    }
+                    if (placed) break;
+
+                    // Hund's Rule: Then pair up
+                    for (let i = 0; i < boxes.length; i++) {
+                        if (boxes[i].children.length === 1) {
+                            addElectron(boxes[i], 'down');
+                            orbitalCounts[orbital.name] = (orbitalCounts[orbital.name] || 0) + 1;
+                            placed = true;
+                            break;
+                        }
+                    }
+                    if (placed) break;
+                }
+                
+                updateConfigString(orbitalCounts);
+                await delay(360); // Animation speed slowed by 50% (240 * 1.5)
+            }
+
+            isAnimating = false;
+            fillButton.disabled = false;
+            electronInput.disabled = false;
+        }
+
+        function addElectron(box, spin) {
+            const electron = document.createElement('span');
+            electron.className = `electron ${spin}`;
+            electron.innerHTML = spin === 'up' ? '↑' : '↓';
+            
+            // Pauli Exclusion Principle: position spin-up and spin-down differently
+            if (box.children.length === 0) {
+                electron.classList.add('electron-1');
+            } else {
+                electron.classList.add('electron-2');
+            }
+            
+            box.appendChild(electron);
+            // Trigger fade-in animation
+            setTimeout(() => electron.classList.add('visible'), 10);
+        }
+
+        function updateConfigString(counts) {
+            let configStr = '';
+            for (const orbital of orbitals) {
+                if (counts[orbital.name]) {
+                    configStr += `${orbital.name}<sup>${counts[orbital.name]}</sup> `;
+                }
+            }
+            configDisplay.innerHTML = configStr.trim();
+        }
+
+        function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // Fullscreen Logic
+        function toggleFullScreen() {
+            const appElement = document.querySelector('body');
+            if (!document.fullscreenElement) {
+                appElement.requestFullscreen().catch(err => {
+                    console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+                });
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        }
+
+        function updateFullscreenIcons() {
+             if (document.fullscreenElement) {
+                enterIcon.classList.add('hidden');
+                exitIcon.classList.remove('hidden');
+            } else {
+                enterIcon.classList.remove('hidden');
+                exitIcon.classList.add('hidden');
+            }
+        }
+
+        // Initial setup
+        createDiagram();
+        fillButton.addEventListener('click', fillOrbitals);
+        resetButton.addEventListener('click', resetSimulation);
+        fullscreenBtn.addEventListener('click', toggleFullScreen);
+        document.addEventListener('fullscreenchange', updateFullscreenIcons);
+    </script>
+</body>
+</html>

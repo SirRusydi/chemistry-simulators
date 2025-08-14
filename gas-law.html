@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gas Laws Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827;
+            color: #e5e7eb;
+            overflow: hidden;
+        }
+        #container {
+            width: 100%;
+            height: 100%;
+            display: block;
+            position: relative;
+        }
+        .font-mono {
+            font-family: 'Roboto Mono', monospace;
+        }
+        canvas {
+            background-color: #000;
+            display: block;
+        }
+    </style>
+</head>
+<body class="flex flex-col md:flex-row h-screen">
+
+    <!-- ==== CONTROLS ==== -->
+    <aside id="controls-container" class="w-full md:w-80 bg-gray-900 p-4 shadow-lg flex-shrink-0">
+        <div class="flex justify-between items-center mb-4">
+            <h1 class="text-lg font-bold text-white">Gas Laws Simulator</h1>
+            <a href="index.html" class="p-2 bg-gray-700/50 hover:bg-gray-600/70 rounded-full text-white" title="Back to Home">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </a>
+        </div>
+        <div class="space-y-4">
+            <div>
+                <label for="law-select" class="block text-sm font-medium text-gray-300 mb-1">Select Gas Law:</label>
+                <select id="law-select" class="w-full bg-gray-700 border border-gray-600 rounded-md py-2 px-3 text-white">
+                    <option value="boyle">Boyle's Law (P₁V₁ = P₂V₂)</option>
+                    <option value="charles">Charles's Law (V₁/T₁ = V₂/T₂)</option>
+                    <option value="avogadro">Avogadro's Law (V₁/n₁ = V₂/n₂)</option>
+                    <option value="ideal" selected>Ideal Gas Law (PV=nRT)</option>
+                </select>
+            </div>
+
+            <!-- Sliders -->
+            <div id="volume-slider-container">
+                <label for="volume-slider" class="block text-sm font-medium text-gray-300">Volume</label>
+                <input type="range" id="volume-slider" min="200" max="600" value="400" class="w-full">
+            </div>
+            <div id="temp-slider-container">
+                <label for="temp-slider" class="block text-sm font-medium text-gray-300">Temperature</label>
+                <input type="range" id="temp-slider" min="1" max="10" value="3" class="w-full">
+            </div>
+             <div id="particles-slider-container">
+                <label for="particles-slider" class="block text-sm font-medium text-gray-300">Number of Particles</label>
+                <input type="range" id="particles-slider" min="10" max="100" value="50" class="w-full">
+            </div>
+            
+            <!-- Displays -->
+            <div class="bg-gray-800 p-3 rounded-md space-y-2">
+                <div id="pressure-display" class="font-mono text-lg">Pressure: 1.00 atm</div>
+                <div id="volume-display" class="font-mono text-sm">Volume: 4.00 L</div>
+                <div id="temp-display" class="font-mono text-sm">Temp: 300 K</div>
+                <div id="particles-display" class="font-mono text-sm">Particles: 50</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ==== SIMULATOR AREA ==== -->
+    <main id="container" class="flex-1 bg-black">
+        <canvas id="simulation-canvas"></canvas>
+    </main>
+
+    <script>
+        const canvas = document.getElementById('simulation-canvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('container');
+
+        const lawSelect = document.getElementById('law-select');
+        const volumeSlider = document.getElementById('volume-slider');
+        const tempSlider = document.getElementById('temp-slider');
+        const particlesSlider = document.getElementById('particles-slider');
+        
+        const pressureDisplay = document.getElementById('pressure-display');
+        const volumeDisplay = document.getElementById('volume-display');
+        const tempDisplay = document.getElementById('temp-display');
+        const particlesDisplay = document.getElementById('particles-display');
+        
+        let particleCount = 50;
+        const PARTICLE_RADIUS = 5;
+        let particles = [];
+        let containerWidth = 400;
+        let containerHeight = 400;
+        let temperature = 3; // Corresponds to speed
+        
+        let pressureSum = 0;
+        let pressureSamples = 0;
+        let lastParticleCount = 50;
+
+        class Particle {
+            constructor(x, y, radius, color) {
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
+                this.color = color;
+                this.mass = 1;
+                this.vx = (Math.random() - 0.5) * temperature;
+                this.vy = (Math.random() - 0.5) * temperature;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.closePath();
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.handleCollisions();
+            }
+
+            handleCollisions() {
+                if (this.x + this.radius > containerWidth) {
+                    this.vx *= -1;
+                    this.x = containerWidth - this.radius;
+                    pressureSum += Math.abs(this.vx);
+                    pressureSamples++;
+                } else if (this.x - this.radius < 0) {
+                    this.vx *= -1;
+                    this.x = this.radius;
+                }
+                if (this.y + this.radius > containerHeight || this.y - this.radius < 0) {
+                    this.vy *= -1;
+                    this.y = Math.max(this.radius, Math.min(containerHeight - this.radius, this.y));
+                }
+            }
+        }
+
+        function init() {
+            onWindowResize();
+            setupControls();
+            createParticles();
+            animate();
+        }
+
+        function createParticles() {
+            particles = [];
+            for (let i = 0; i < particleCount; i++) {
+                const x = Math.random() * (containerWidth - PARTICLE_RADIUS * 2) + PARTICLE_RADIUS;
+                const y = Math.random() * (containerHeight - PARTICLE_RADIUS * 2) + PARTICLE_RADIUS;
+                particles.push(new Particle(x, y, PARTICLE_RADIUS, `hsl(${240 - temperature * 20}, 100%, 50%)`));
+            }
+            lastParticleCount = particleCount;
+        }
+
+        function updateParticles() {
+            particles.forEach(p => {
+                const speed = Math.sqrt(p.vx**2 + p.vy**2);
+                if (speed > 0) {
+                    p.vx = (p.vx / speed) * temperature;
+                    p.vy = (p.vy / speed) * temperature;
+                }
+                p.color = `hsl(${240 - temperature * 20}, 100%, 70%)`;
+                p.update();
+                p.draw();
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.strokeStyle = '#4b5563';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(0, 0, containerWidth, containerHeight);
+
+            updateParticles();
+            updateUI();
+        }
+        
+        function updateUI() {
+            const currentLaw = lawSelect.value;
+            
+            if (currentLaw === 'boyle') {
+                containerWidth = parseFloat(volumeSlider.value);
+                const P = (pressureSamples > 0) ? (pressureSum / pressureSamples) * 100 / (containerWidth / 200) : 1;
+                pressureDisplay.textContent = `Pressure: ${P.toFixed(2)} atm`;
+            } else if (currentLaw === 'charles') {
+                temperature = parseFloat(tempSlider.value);
+                containerWidth = temperature * 60;
+                pressureDisplay.textContent = `Pressure: 3.00 atm (Constant)`;
+            } else if (currentLaw === 'avogadro') {
+                particleCount = parseInt(particlesSlider.value);
+                containerWidth = particleCount * 8;
+                pressureDisplay.textContent = `Pressure: 3.00 atm (Constant)`;
+            } else if (currentLaw === 'ideal') {
+                containerWidth = parseFloat(volumeSlider.value);
+                temperature = parseFloat(tempSlider.value);
+                particleCount = parseInt(particlesSlider.value);
+                const R = 0.0821; // Ideal gas constant proxy
+                const P = (particleCount * R * (temperature * 100)) / (containerWidth / 100);
+                pressureDisplay.textContent = `Pressure: ${P.toFixed(2)} atm`;
+            }
+            
+            if (particleCount !== lastParticleCount) {
+                createParticles();
+            }
+
+            volumeDisplay.textContent = `Volume: ${(containerWidth / 100).toFixed(2)} L`;
+            tempDisplay.textContent = `Temp: ${(temperature * 100).toFixed(0)} K`;
+            particlesDisplay.textContent = `Particles: ${particleCount}`;
+            
+            if(pressureSamples > 100) {
+                pressureSum = 0;
+                pressureSamples = 0;
+            }
+        }
+
+        function setupControls() {
+            const volumeContainer = document.getElementById('volume-slider-container');
+            const tempContainer = document.getElementById('temp-slider-container');
+            const particlesContainer = document.getElementById('particles-slider-container');
+
+            function toggleLaw() {
+                const currentLaw = lawSelect.value;
+                resetSimulationState();
+                
+                volumeContainer.style.display = 'none';
+                tempContainer.style.display = 'none';
+                particlesContainer.style.display = 'none';
+
+                if (currentLaw === 'boyle') {
+                    volumeContainer.style.display = 'block';
+                    temperature = 3;
+                    particleCount = 50;
+                } else if (currentLaw === 'charles') {
+                    tempContainer.style.display = 'block';
+                    particleCount = 50;
+                } else if (currentLaw === 'avogadro') {
+                    particlesContainer.style.display = 'block';
+                    temperature = 3;
+                } else if (currentLaw === 'ideal') {
+                    volumeContainer.style.display = 'block';
+                    tempContainer.style.display = 'block';
+                    particlesContainer.style.display = 'block';
+                }
+                createParticles();
+            }
+            lawSelect.addEventListener('change', toggleLaw);
+            volumeSlider.addEventListener('input', updateUI);
+            tempSlider.addEventListener('input', updateUI);
+            particlesSlider.addEventListener('input', updateUI);
+            toggleLaw();
+        }
+        
+        function resetSimulationState() {
+            pressureSum = 0;
+            pressureSamples = 0;
+            temperature = 3;
+            containerWidth = 400;
+            particleCount = 50;
+            volumeSlider.value = 400;
+            tempSlider.value = 3;
+            particlesSlider.value = 50;
+        }
+
+        function onWindowResize() {
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            containerHeight = canvas.height;
+        }
+
+        init();
+    </script>
+</body>
+</html>

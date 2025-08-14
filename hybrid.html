@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Orbital Hybridization Simulator (Fixed Geometry)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body { font-family:'Inter',sans-serif; background-color:#111827; color:#e5e7eb; overflow:hidden; }
+    #container { width:100%; height:100%; display:block; position:relative; }
+    .font-mono { font-family:'Roboto Mono',monospace; }
+    canvas { outline:none; }
+  </style>
+</head>
+<body class="flex flex-col md:flex-row h-screen">
+
+  <!-- ==== CONTROLS ==== -->
+  <aside class="w-full md:w-80 bg-gray-900 p-4 shadow-lg flex-shrink-0">
+    <div class="flex justify-between items-center mb-4">
+      <h1 class="text-lg font-bold text-white">Orbital Hybridization</h1>
+      <a href="index.html" class="p-2 bg-gray-700/50 hover:bg-gray-600/70 rounded-full text-white" title="Back to Home">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      </a>
+    </div>
+
+    <div class="space-y-4">
+      <div>
+        <label for="hybrid-select" class="block text-sm font-medium text-gray-300 mb-1">Hybridization Type:</label>
+        <select id="hybrid-select" class="w-full bg-gray-700 border border-gray-600 rounded-md py-2 px-3 text-white">
+          <option value="sp">sp</option>
+          <option value="sp2">sp2</option>
+          <option value="sp3" selected>sp3</option>
+          <option value="sp3d">sp3d</option>
+          <option value="sp3d2">sp3d2</option>
+        </select>
+      </div>
+      <button id="run-button" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md">Visualize</button>
+      <div>
+        <h2 class="text-md font-bold text-white mb-1">Resulting Geometry:</h2>
+        <div id="geometry-display" class="font-mono text-green-300 text-sm"></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ==== VISUALIZATION ==== -->
+  <main id="container" class="flex-1 bg-black">
+    <button id="fullscreen-btn" class="absolute bottom-4 right-4 z-20 p-2 bg-gray-700/50 hover:bg-gray-600/70 rounded-full text-white" title="Toggle Fullscreen">
+      <svg id="fullscreen-enter-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+      <svg id="fullscreen-exit-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="hidden"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
+    </button>
+  </main>
+
+  <!-- three.js (ESM) -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    let scene, camera, renderer, controls;
+    const container = document.getElementById('container');
+    const hybridSelect = document.getElementById('hybrid-select');
+    const runButton = document.getElementById('run-button');
+    const geometryDisplay = document.getElementById('geometry-display');
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+    const enterIcon = document.getElementById('fullscreen-enter-icon');
+    const exitIcon = document.getElementById('fullscreen-exit-icon');
+
+    const orbitalGroup = new THREE.Group();
+    let isAnimating = false;
+
+    // Display text for geometry
+    const HYBRID_DATA = {
+      sp:    { geometry:'Linear (180°)',            atomic:['s','pz'], lobes:2 },
+      sp2:   { geometry:'Trigonal planar (120°)',   atomic:['s','px','py'], lobes:3 },
+      sp3:   { geometry:'Tetrahedral (109.5°)',     atomic:['s','px','py','pz'], lobes:4 },
+      sp3d:  { geometry:'Trigonal bipyramidal',     atomic:['s','px','py','pz','dz2'], lobes:5 },
+      sp3d2: { geometry:'Octahedral (90°)',         atomic:['s','px','py','pz','dz2','dx2-y2'], lobes:6 }
+    };
+
+    init();
+    runAnimation();
+
+    function init() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x000000);
+
+      camera = new THREE.PerspectiveCamera(70, container.clientWidth/container.clientHeight, 0.1, 1000);
+      camera.position.set(0, 3.8, 11);
+
+      renderer = new THREE.WebGLRenderer({ antialias:true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      container.appendChild(renderer.domElement);
+
+      // Lights
+      const ambient = new THREE.AmbientLight(0xffffff, 0.75);
+      scene.add(ambient);
+      const dir = new THREE.DirectionalLight(0xffffff, 1.5);
+      dir.position.set(6, 10, 7);
+      scene.add(dir);
+
+      // Controls
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+
+      // Nucleus (center)
+      const nucleus = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 24, 24),
+        new THREE.MeshStandardMaterial({ color: 0x9ca3af, metalness:0.1, roughness:0.7 })
+      );
+      nucleus.renderOrder = 2;
+      orbitalGroup.add(nucleus);
+
+      scene.add(orbitalGroup);
+
+      // UI
+      runButton.addEventListener('click', runAnimation);
+      window.addEventListener('resize', onWindowResize);
+      fullscreenBtn.addEventListener('click', toggleFullScreen);
+      document.addEventListener('fullscreenchange', updateFullscreenIcons);
+
+      onWindowResize();
+      animate();
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    function onWindowResize() {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      camera.aspect = w/h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h, false);
+    }
+
+    /* --------- Atomic orbitals (unchanged visuals) --------- */
+    function makeTextSprite(message) {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = 256; canvas.height = 128;
+      ctx.font = 'Bold 48px Arial';
+      ctx.fillStyle = 'rgba(255,255,255,1)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(message, 128, 64);
+      const tex = new THREE.Texture(canvas);
+      tex.needsUpdate = true;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent:true }));
+      sprite.scale.set(2.5, 1.25, 1);
+      return sprite;
+    }
+
+    function createAtomicOrbitalMesh(type) {
+      const group = new THREE.Group();
+      let material;
+
+      const pGeo = new THREE.SphereGeometry(1.0, 32, 32);
+      pGeo.scale(1, 1.8, 1);
+
+      switch(type) {
+        case 's':
+          material = new THREE.MeshLambertMaterial({ color:0x3b82f6, transparent:true, opacity:0.7 });
+          group.add(new THREE.Mesh(new THREE.SphereGeometry(1.5, 32, 32), material));
+          break;
+        case 'px':
+          material = new THREE.MeshLambertMaterial({ color:0xef4444, transparent:true, opacity:0.7 });
+          const px1 = new THREE.Mesh(pGeo, material); px1.position.x = 1.5;
+          const px2 = new THREE.Mesh(pGeo, material); px2.position.x = -1.5;
+          group.add(px1, px2);
+          break;
+        case 'py':
+          material = new THREE.MeshLambertMaterial({ color:0x22c55e, transparent:true, opacity:0.7 });
+          const py1 = new THREE.Mesh(pGeo, material); py1.position.y = 1.5;
+          const py2 = new THREE.Mesh(pGeo, material); py2.position.y = -1.5;
+          group.add(py1, py2);
+          break;
+        case 'pz':
+          material = new THREE.MeshLambertMaterial({ color:0xf59e0b, transparent:true, opacity:0.7 });
+          const pz1 = new THREE.Mesh(pGeo, material); pz1.position.z = 1.5;
+          const pz2 = new THREE.Mesh(pGeo, material); pz2.position.z = -1.5;
+          group.add(pz1, pz2);
+          break;
+        case 'dz2':
+          material = new THREE.MeshLambertMaterial({ color:0x8b5cf6, transparent:true, opacity:0.7 });
+          const dz1 = new THREE.Mesh(pGeo, material); dz1.position.z = 1.5;
+          const dz2m = new THREE.Mesh(pGeo, material); dz2m.position.z = -1.5;
+          const torus = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.3, 16, 96), material);
+          torus.rotation.x = Math.PI / 2;
+          group.add(dz1, dz2m, torus);
+          break;
+        case 'dx2-y2':
+          material = new THREE.MeshLambertMaterial({ color:0xec4899, transparent:true, opacity:0.7 });
+          const a = new THREE.Mesh(pGeo, material); a.position.x = 1.5;
+          const b = new THREE.Mesh(pGeo, material); b.position.x = -1.5;
+          const c = new THREE.Mesh(pGeo, material); c.position.y = 1.5;
+          const d = new THREE.Mesh(pGeo, material); d.position.y = -1.5;
+          group.add(a,b,c,d);
+          break;
+      }
+      const label = makeTextSprite(type);
+      label.position.y = 3.4;
+      group.add(label);
+      return group;
+    }
+
+    /* --------- Hybrid orbitals (fixed geometry) --------- */
+
+    // Directions for each hybrid set (unit vectors)
+    function getHybridDirections(type) {
+      if (type === 'sp') {
+        return [ new THREE.Vector3(1,0,0), new THREE.Vector3(-1,0,0) ];
+      }
+      if (type === 'sp2') {
+        const dirs = [];
+        for (let i=0;i<3;i++){
+          const t = i * 2*Math.PI/3;
+          dirs.push( new THREE.Vector3(Math.cos(t), 0, Math.sin(t)) );
+        }
+        return dirs;
+      }
+      if (type === 'sp3') {
+        // Tetrahedral: directions to the vertices of a regular tetrahedron
+        return [
+          new THREE.Vector3( 1, 1, 1).normalize(),
+          new THREE.Vector3( 1,-1,-1).normalize(),
+          new THREE.Vector3(-1, 1,-1).normalize(),
+          new THREE.Vector3(-1,-1, 1).normalize()
+        ];
+      }
+      if (type === 'sp3d') {
+        // 3 equatorial (xy-plane, 120° apart), 2 axial (±y)
+        return [
+          new THREE.Vector3(1,0,0),
+          new THREE.Vector3(-1/2,0, Math.sqrt(3)/2).normalize(),
+          new THREE.Vector3(-1/2,0,-Math.sqrt(3)/2).normalize(),
+          new THREE.Vector3(0, 1, 0),
+          new THREE.Vector3(0,-1, 0)
+        ];
+      }
+      if (type === 'sp3d2') {
+        // Octahedral axes
+        return [
+          new THREE.Vector3( 1,0,0),
+          new THREE.Vector3(-1,0,0),
+          new THREE.Vector3(0, 1,0),
+          new THREE.Vector3(0,-1,0),
+          new THREE.Vector3(0,0, 1),
+          new THREE.Vector3(0,0,-1)
+        ];
+      }
+      return [];
+    }
+
+    // Create ONE hybrid orbital = connected large lobe (outward) + small lobe (inward), centered at origin.
+    function createHybridOrbitalMesh() {
+    const group = new THREE.Group();
+
+    const matLarge = new THREE.MeshStandardMaterial({
+        color: 0x7dd3fc,
+        transparent: true,
+        opacity: 0.9,
+        roughness: 0.4,
+        metalness: 0.0
+    });
+
+    // Large teardrop lobe (scaled sphere)
+    const geoLarge = new THREE.SphereGeometry(1.0, 48, 48);
+    // Scale: taller and wider at outer end, narrower toward center
+    geoLarge.scale(0.6, 1.6, 0.6);
+    const largeLobe = new THREE.Mesh(geoLarge, matLarge);
+    largeLobe.position.y = 1.0; // offset so tip is near origin
+    group.add(largeLobe);
+
+    // Small inward lobe
+    const matSmall = matLarge.clone();
+    matSmall.opacity = 0.5;
+    const geoSmall = new THREE.SphereGeometry(0.35, 32, 32);
+    geoSmall.scale(0.55, 1.0, 0.55);
+    const smallLobe = new THREE.Mesh(geoSmall, matSmall);
+    smallLobe.position.y = -0.35; // overlaps near origin
+    group.add(smallLobe);
+
+    return group;
+}
+
+    // Orient a hybrid orbital so its +Y axis points along 'dir'
+    function orientOrbital(mesh, dir) {
+      const from = new THREE.Vector3(0,1,0);
+      const to = dir.clone().normalize();
+      const q = new THREE.Quaternion().setFromUnitVectors(from, to);
+      mesh.setRotationFromQuaternion(q);
+    }
+
+    /* --------- Animation pipeline --------- */
+
+    async function runAnimation() {
+      if (isAnimating) return;
+      isAnimating = true;
+      runButton.disabled = true;
+
+      const type = hybridSelect.value;
+      geometryDisplay.textContent = HYBRID_DATA[type].geometry;
+
+      // Clear group (keep nucleus at index 0)
+      while (orbitalGroup.children.length > 1) {
+        orbitalGroup.remove(orbitalGroup.children[orbitalGroup.children.length - 1]);
+      }
+
+      // 1) Show separated atomic orbitals around then bring to center
+      const atomicMeshes = HYBRID_DATA[type].atomic.map(name => createAtomicOrbitalMesh(name));
+      const ringR = 6;
+      atomicMeshes.forEach((m, i) => {
+        const angle = (i / atomicMeshes.length) * Math.PI * 2;
+        m.position.set(Math.cos(angle)*ringR, Math.sin(angle)*ringR, 0);
+        orbitalGroup.add(m);
+      });
+
+      await delay(1200);
+      await Promise.all(atomicMeshes.map(m => animateMesh(m, { position:new THREE.Vector3(0,0,0) }, 600 )));
+      await delay(250);
+
+      await Promise.all(atomicMeshes.map(m => animateMesh(m, { scale:0.001 }, 450 )));
+      atomicMeshes.forEach(m => orbitalGroup.remove(m));
+
+      // 2) Grow the correct number of hybrid orbitals at the center, properly oriented
+      const dirs = getHybridDirections(type);
+      const hybrids = dirs.map(() => createHybridOrbitalMesh());
+      hybrids.forEach((mesh, i) => {
+        mesh.scale.set(0.001, 0.001, 0.001);
+        orientOrbital(mesh, dirs[i]);
+        orbitalGroup.add(mesh);
+      });
+      await Promise.all(hybrids.map(m => animateMesh(m, { scale:1.0 }, 500 )));
+
+      isAnimating = false;
+      runButton.disabled = false;
+    }
+
+    function animateMesh(mesh, targets, duration) {
+      return new Promise(resolve => {
+        const t0 = performance.now();
+        const startScale = mesh.scale.clone();
+        const startPos = mesh.position.clone();
+
+        function loop(now) {
+          const t = Math.min(1, (now - t0) / duration);
+          if (targets.scale !== undefined) {
+            const s = new THREE.Vector3().lerpVectors(startScale, new THREE.Vector3(targets.scale, targets.scale, targets.scale), t);
+            mesh.scale.copy(s);
+          }
+          if (targets.position) {
+            const p = new THREE.Vector3().lerpVectors(startPos, targets.position, t);
+            mesh.position.copy(p);
+          }
+          if (t < 1) requestAnimationFrame(loop); else resolve();
+        }
+        requestAnimationFrame(loop);
+      });
+    }
+
+    function delay(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+    function toggleFullScreen() {
+      const app = document.body;
+      if (!document.fullscreenElement) app.requestFullscreen().catch(()=>{});
+      else document.exitFullscreen();
+    }
+    function updateFullscreenIcons() {
+      if (document.fullscreenElement) { enterIcon.classList.add('hidden'); exitIcon.classList.remove('hidden'); }
+      else { enterIcon.classList.remove('hidden'); exitIcon.classList.add('hidden'); }
+    }
+  </script>
+</body>
+</html>
